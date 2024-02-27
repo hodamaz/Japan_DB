@@ -420,3 +420,117 @@ VALUES
 ALTER TABLE CulturalExperiences
 ADD CulturalExperienceID INT AUTO_INCREMENT PRIMARY KEY, 
 ADD FOREIGN KEY (CityID) REFERENCES City(CityID);
+
+
+USE Japan_DB;
+-- 1. What is the anticipated cost of accommodation per city? [VIEW + JOIN]
+
+CREATE VIEW CityStaysInfo AS
+SELECT
+  c.CityName,
+  ROUND(AVG(ai.MinPricePerNight + ai.MaxPricePerNight)/2,1) AS AveragePrice,
+  ROUND(AVG(cs.MinLengthStay + cs.MaxLengthStay)/2, 1) AS AverageLengthStay,
+  ROUND(AVG(((ai.MinPricePerNight + ai.MaxPricePerNight)/2) * ((cs.MinLengthStay + cs.MaxLengthStay)/2)),1) AS FinalPrice
+FROM
+  City c
+  JOIN CityStays cs ON c.CityID = cs.CityID
+  JOIN AccommodationInfo ai ON cs.CityID = ai.AccommodationID
+GROUP BY
+  c.CityName;
+ 
+
+-- 2. What is the daily expenditure in each city excluding accommodation costs? [Procedure]
+DELIMITER //
+
+CREATE PROCEDURE Daily_Expenditure_Excluding_Accommodation (
+    IN city_name VARCHAR(255),
+    OUT total_expenditure DECIMAL(10, 2)
+)
+BEGIN
+    DECLARE city_id INT;
+
+    -- Get the CityID based on the provided CityName
+    SELECT CityID INTO city_id FROM City WHERE CityName = city_name;
+
+    -- Calculate the total expenditure excluding 'Accommodation'
+    SELECT SUM(AverageDailySpending)
+    INTO total_expenditure
+    FROM SpendingHabits
+    WHERE CityID = city_id
+    AND SpendingCategory IN ('Food', 'Sightseeing', 'Transportation');
+END //
+DELIMITER ;
+CALL Daily_Expenditure_Excluding_Accommodation('osaka', @total_expenditure);
+SELECT @total_expenditure;
+
+-- 3. Looking for tourist attractions which are not crowded [JOIN]
+SELECT
+  CityName,
+  AttractionName
+FROM
+  City
+  JOIN TouristAttractions ON City.CityID = TouristAttractions.CityID
+WHERE
+  AnnualVisitors <= 1000000;
+
+-- 4. Looking for tourist attractions which are considered super crowded [sub-query]
+SELECT AttractionName, AnnualVisitors
+FROM TouristAttractions
+WHERE CityID IN (
+    SELECT CityID
+    FROM TouristAttractions
+    WHERE AnnualVisitors > 1000000    
+);
+
+-- 5. Extracting high satisfaction rated Experiences in each city [GROUPBY]
+SELECT
+  c.CityID,
+  c.CityName,
+  ce.ExperienceType,
+  ROUND(AVG(ce.SatisfactionRating), 1) AS AvgSatisfactionRating
+FROM
+  CulturalExperiences ce
+  JOIN City c ON c.CityID = ce.CityID
+GROUP BY
+  c.CityID,
+  ce.ExperienceType
+HAVING
+  AvgSatisfactionRating >= 5;
+  
+
+-- 6. Create a Function that extracts expenditure from a city [FUNCTION]
+/*
+SELECT 
+    City.CityName,
+    SUM(AverageDailySpending) AS TotalExpenditure
+FROM 
+    City
+INNER JOIN 
+    SpendingHabits ON City.CityID = SpendingHabits.CityID
+GROUP BY 
+    City.CityName;
+*/
+    
+DELIMITER //
+
+CREATE FUNCTION getCityTotalExpenditure(cityName VARCHAR(255)) 
+RETURNS DECIMAL(10, 1)
+DETERMINISTIC
+BEGIN 
+    DECLARE totalExpenditure DECIMAL(10, 1);
+
+    -- Calculate the total expenditure for the specified city
+    SELECT 
+        SUM(AverageDailySpending) INTO totalExpenditure
+    FROM 
+        City
+    INNER JOIN 
+        SpendingHabits ON City.CityID = SpendingHabits.CityID
+    WHERE 
+        City.CityName = cityName;
+
+    RETURN totalExpenditure;
+END //
+
+DELIMITER ;    
+
